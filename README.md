@@ -1,3 +1,3 @@
-# Welcome to your Lovable project
+# Dino Play
 
-TODO: Document your project here
+A fun game to learn about dinosaurs, made by Clyde and Papa.
