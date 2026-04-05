@@ -172,3 +172,281 @@
   0% { transform: scale(0.9); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }
 }
+
+/* Phase 1: Mario physics animations */
+
+@keyframes dust {
+  0% { transform: translateY(0) scale(1); opacity: 0.6; }
+  100% { transform: translateY(-20px) translateX(var(--dust-x, 10px)) scale(0.3); opacity: 0; }
+}
+
+.animate-dust {
+  --dust-x: 10px;
+  animation: dust 0.4s ease-out forwards;
+}
+
+.animate-dust:nth-child(odd) {
+  --dust-x: -12px;
+}
+
+.animate-dust:nth-child(3) {
+  --dust-x: 18px;
+}
+
+@keyframes ptero-flap {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(-1); }
+}
+
+.animate-ptero-flap {
+  animation: ptero-flap 0.4s ease-in-out infinite;
+  transform-origin: center 50%;
+}
+
+@keyframes dino-duck {
+  0% { transform: scaleX(1) scaleY(1); }
+  100% { transform: scaleX(1.2) scaleY(0.55); }
+}
+
+.animate-dino-duck {
+  animation: dino-duck 0.1s ease-out forwards;
+  transform-origin: bottom center;
+}
+
+/* Phase 2: Particle animations */
+
+@keyframes particle-dust {
+  0% { transform: translateY(0) translateX(0) scale(1); opacity: 0.7; }
+  100% { transform: translateY(-25px) translateX(var(--px, 15px)) scale(0.2); opacity: 0; }
+}
+
+@keyframes particle-sparkle {
+  0% { transform: scale(0) rotate(0deg); opacity: 1; }
+  50% { transform: scale(1.3) rotate(180deg); opacity: 1; }
+  100% { transform: scale(0) rotate(360deg) translateY(-30px); opacity: 0; }
+}
+
+@keyframes particle-impact {
+  0% { transform: translate(0, 0) scale(1); opacity: 0.9; }
+  100% { transform: translate(var(--px, 20px), var(--py, -15px)) scale(0.3); opacity: 0; }
+}
+
+@keyframes score-float {
+  0% { transform: translateY(0) scale(1); opacity: 1; }
+  100% { transform: translateY(-40px) scale(1.2); opacity: 0; }
+}
+
+@keyframes combo-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  40% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.animate-particle-dust {
+  --px: 15px;
+  animation: particle-dust 0.45s ease-out forwards;
+}
+
+.animate-particle-dust:nth-child(odd) { --px: -12px; }
+.animate-particle-dust:nth-child(3n) { --px: 20px; }
+.animate-particle-dust:nth-child(4n) { --px: -8px; }
+
+.animate-particle-sparkle {
+  animation: particle-sparkle 0.65s ease-out forwards;
+}
+
+.animate-particle-impact {
+  --px: 20px;
+  --py: -15px;
+  animation: particle-impact 0.5s ease-out forwards;
+}
+
+.animate-particle-impact:nth-child(odd) { --px: -18px; --py: -20px; }
+.animate-particle-impact:nth-child(3n) { --px: 25px; --py: -8px; }
+.animate-particle-impact:nth-child(4n) { --px: -10px; --py: -25px; }
+
+.animate-score-float {
+  animation: score-float 0.8s ease-out forwards;
+}
+
+.animate-combo-pop {
+  animation: combo-pop 0.4s ease-out forwards;
+}
+
+@keyframes obstacle-break {
+  0% { transform: scale(1) rotate(0deg); opacity: 1; filter: brightness(2); }
+  30% { transform: scale(1.2) rotate(5deg); opacity: 0.8; }
+  100% { transform: scale(0.3) rotate(25deg) translateY(20px); opacity: 0; }
+}
+
+.animate-obstacle-break {
+  animation: obstacle-break 0.4s ease-out forwards;
+}
+
+@keyframes fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+/* Seamless parallax scrolling — no JS modulo, no snapping */
+@keyframes parallax-scroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+.parallax-scroll {
+  animation: parallax-scroll 20s linear infinite;
+  width: 200%;
+}
+
+/* Background events */
+@keyframes shooting-star {
+  0% { transform: translate(0, 0); opacity: 1; }
+  100% { transform: translate(-80vw, 15vh); opacity: 0; }
+}
+
+@keyframes volcano-puff {
+  0% { transform: translateY(0) scale(0.5); opacity: 0.4; }
+  50% { transform: translateY(-30px) scale(1.2); opacity: 0.3; }
+  100% { transform: translateY(-60px) scale(1.8); opacity: 0; }
+}
+
+@keyframes herd-run {
+  0% { transform: translateX(100vw); }
+  100% { transform: translateX(-20vw); }
+}
+
+.animate-shooting-star {
+  animation: shooting-star 1.5s ease-out forwards;
+}
+
+.animate-volcano-puff {
+  animation: volcano-puff 3s ease-out forwards;
+}
+
+.animate-herd-run {
+  animation: herd-run 4s linear forwards;
+}
+
+/* Near miss flash */
+@keyframes near-miss {
+  0% { transform: scale(0.5); opacity: 0; }
+  30% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(1); opacity: 0; }
+}
+
+.animate-near-miss {
+  animation: near-miss 0.6s ease-out forwards;
+}
+
+/* Speed milestone flash */
+@keyframes speed-flash {
+  0% { transform: scale(0.8) translateX(20px); opacity: 0; }
+  20% { transform: scale(1.1) translateX(0); opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: scale(1) translateX(-20px); opacity: 0; }
+}
+
+.animate-speed-flash {
+  animation: speed-flash 1.2s ease-out forwards;
+}
+
+/* Fossil collect pop — scale up and vanish */
+@keyframes fossil-pop {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.6); opacity: 0.8; }
+  100% { transform: scale(0.3); opacity: 0; }
+}
+
+.animate-fossil-pop {
+  animation: fossil-pop 0.2s ease-out forwards;
+}
+
+/* Score counter bump */
+@keyframes score-bump {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.25); color: #FFD700; }
+  100% { transform: scale(1); }
+}
+
+.animate-score-bump {
+  animation: score-bump 0.25s ease-out;
+}
+
+/* Heart lost — shake and grey */
+@keyframes heart-lost {
+  0% { transform: scale(1); }
+  20% { transform: scale(1.3) rotate(-10deg); }
+  40% { transform: scale(0.8) rotate(10deg); }
+  60% { transform: scale(1.1) rotate(-5deg); }
+  100% { transform: scale(1); filter: grayscale(1); opacity: 0.3; }
+}
+
+.animate-heart-lost {
+  animation: heart-lost 0.5s ease-out forwards;
+}
+
+/* New best flash */
+@keyframes new-best-flash {
+  0% { transform: scale(0); opacity: 0; }
+  30% { transform: scale(1.3); opacity: 1; color: #FFD700; }
+  60% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1); opacity: 0; }
+}
+
+.animate-new-best {
+  animation: new-best-flash 1.5s ease-out forwards;
+}
+
+/* Streak glow on screen edges */
+@keyframes streak-glow {
+  0%, 100% { box-shadow: inset 0 0 30px rgba(255, 215, 0, 0.15); }
+  50% { box-shadow: inset 0 0 60px rgba(255, 215, 0, 0.3); }
+}
+
+.animate-streak-glow {
+  animation: streak-glow 1s ease-in-out infinite;
+}
+
+/* Fossil scatter — flies outward on hit */
+@keyframes fossil-scatter-1 { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(40px,-60px) scale(0.5); opacity:0; } }
+@keyframes fossil-scatter-2 { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(-30px,-50px) scale(0.5); opacity:0; } }
+@keyframes fossil-scatter-3 { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(50px,-30px) scale(0.5); opacity:0; } }
+@keyframes fossil-scatter-4 { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(-45px,-40px) scale(0.5); opacity:0; } }
+@keyframes fossil-scatter-5 { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(35px,-70px) scale(0.5); opacity:0; } }
+@keyframes fossil-scatter-6 { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(-55px,-25px) scale(0.5); opacity:0; } }
+@keyframes fossil-scatter-7 { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(20px,-55px) scale(0.5); opacity:0; } }
+@keyframes fossil-scatter-8 { 0% { transform: translate(0,0) scale(1); opacity:1; } 100% { transform: translate(-40px,-65px) scale(0.5); opacity:0; } }
+
+.animate-fossil-scatter-1 { animation: fossil-scatter-1 1.5s ease-out forwards; }
+.animate-fossil-scatter-2 { animation: fossil-scatter-2 1.5s ease-out forwards; }
+.animate-fossil-scatter-3 { animation: fossil-scatter-3 1.5s ease-out forwards; }
+.animate-fossil-scatter-4 { animation: fossil-scatter-4 1.5s ease-out forwards; }
+.animate-fossil-scatter-5 { animation: fossil-scatter-5 1.5s ease-out forwards; }
+.animate-fossil-scatter-6 { animation: fossil-scatter-6 1.5s ease-out forwards; }
+.animate-fossil-scatter-7 { animation: fossil-scatter-7 1.5s ease-out forwards; }
+.animate-fossil-scatter-8 { animation: fossil-scatter-8 1.5s ease-out forwards; }
+
+/* Game over overlay */
+@keyframes game-over-in {
+  0% { opacity: 0; transform: scale(0.9); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.animate-game-over {
+  animation: game-over-in 0.4s ease-out forwards;
+}
+
+/* Invincibility flash */
+@keyframes invincible-flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.animate-invincible {
+  animation: invincible-flash 0.2s ease-in-out infinite;
+}

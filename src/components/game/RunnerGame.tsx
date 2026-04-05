@@ -1,287 +1,405 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { type Dinosaur } from '@/data/dinosaurs';
 import { DinoSVG } from './DinoSVG';
+import { ParticleRenderer, useParticles } from './Particles';
+import { PHYSICS, getStreakMultiplier } from '@/lib/physics';
+import { useGameInput } from '@/hooks/useGameInput';
+import { useGamePhysics, type PhysicsState } from '@/hooks/useGamePhysics';
+import { useGameLoop } from '@/hooks/useGameLoop';
+import { useScreenShake } from '@/hooks/useScreenShake';
+import { GameAudio } from '@/lib/audio';
+import { ParallaxBackground } from './ParallaxBackground';
 
-interface Obstacle {
-  id: number;
-  x: number;
-  type: 'rock' | 'log' | 'river';
-  width: number;
-  height: number;
-}
+type ObstacleType = 'rock' | 'log';
 
-interface Egg {
-  id: number;
-  x: number;
-  y: number;
-  collected: boolean;
-  factIndex: number;
+interface Obstacle { id: number; x: number; type: ObstacleType; width: number; height: number; destroying?: boolean; }
+interface Fossil { id: number; x: number; y: number; collected: boolean; popping?: boolean; }
+interface Egg { id: number; x: number; y: number; collected: boolean; factIndex: number; }
+interface ScorePopup { id: number; x: number; y: number; text: string; color: string; }
+interface ScatterFossil { id: number; variant: number; }
+
+export interface RunResult {
+  factsCollected: number[];
+  distance: number;
+  fossils: number;
+  score: number;
+  stumbles: number;
 }
 
 interface Props {
   dino: Dinosaur;
-  onComplete: (factsCollected: number[], distance: number) => void;
+  isReplay?: boolean;
+  onComplete: (result: RunResult) => void;
   onBack: () => void;
 }
 
-const GROUND_Y = 75; // % from top
-const GAME_SPEED_BASE = 2.5;
-const JUMP_VELOCITY = -14;
-const GRAVITY = 0.7;
-const GAME_DURATION = 35000; // 35s
-const OBSTACLE_INTERVAL = 2200;
-const EGG_INTERVAL = 3500;
+const BEST_SCORE_KEY = 'dino-dash-best';
+function getBestScore(): number { return parseInt(localStorage.getItem(BEST_SCORE_KEY) || '0', 10); }
+function saveBestScore(s: number) { localStorage.setItem(BEST_SCORE_KEY, String(s)); }
 
-export const RunnerGame: React.FC<Props> = ({ dino, onComplete, onBack }) => {
-  const [dinoY, setDinoY] = useState(0);
-  const [isJumping, setIsJumping] = useState(false);
-  const [isStumbling, setIsStumbling] = useState(false);
+export const RunnerGame: React.FC<Props> = ({ dino, isReplay = false, onComplete, onBack }) => {
+  // --- State ---
+  const [physicsState, setPhysicsState] = useState<PhysicsState>({
+    y: 0, velocityY: 0, isGrounded: true, isJumping: false,
+    squash: { scaleX: 1, scaleY: 1 }, justLanded: false, justJumped: false,
+  });
   const [obstacles, setObstacles] = useState<Obstacle[]>([]);
+  const [fossils, setFossils] = useState<Fossil[]>([]);
   const [eggs, setEggs] = useState<Egg[]>([]);
-  const [distance, setDistance] = useState(0);
+  const [fossilCount, setFossilCount] = useState(0);
   const [factsCollected, setFactsCollected] = useState<number[]>([]);
   const [showFact, setShowFact] = useState<string | null>(null);
-  const [gameStarted, setGameStarted] = useState(false);
-  const [countdown, setCountdown] = useState(3);
+  const [gameStarted, setGameStarted] = useState(isReplay);
+  const [countdown, setCountdown] = useState(isReplay ? 0 : 3);
+  const [isStumbling, setIsStumbling] = useState(false);
+  const [invincible, setInvincible] = useState(false);
+  const [scorePopups, setScorePopups] = useState<ScorePopup[]>([]);
+  const [gameElapsed, setGameElapsed] = useState(0);
+  const [currentSpeed, setCurrentSpeed] = useState(PHYSICS.GAME_SPEED_BASE);
+  const [isMuted, setIsMuted] = useState(GameAudio.isMuted());
+  const [hearts, setHearts] = useState(PHYSICS.MAX_HEARTS);
+  const [heartLostIndex, setHeartLostIndex] = useState(-1);
+  const [streak, setStreak] = useState(0);
+  const [scoreBump, setScoreBump] = useState(false);
+  const [nearMiss, setNearMiss] = useState(false);
+  const [speedMilestone, setSpeedMilestone] = useState<string | null>(null);
+  const [scatterFossils, setScatterFossils] = useState<ScatterFossil[]>([]);
+  const [gameOver, setGameOver] = useState(false);
+  const [newBestFlash, setNewBestFlash] = useState(false);
+  const [bestScore] = useState(getBestScore());
+  const [finalScore, setFinalScore] = useState(0);
 
-  const velocityRef = useRef(0);
-  const dinoYRef = useRef(0);
-  const gameRef = useRef<number>(0);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const lastObstacleRef = useRef(0);
-  const lastEggRef = useRef(0);
-  const startTimeRef = useRef(0);
-  const obstacleIdRef = useRef(0);
+  // --- Refs ---
+  const obstaclesArr = useRef<Obstacle[]>([]);
+  const fossilsArr = useRef<Fossil[]>([]);
+  const eggsArr = useRef<Egg[]>([]);
+  const dist = useRef(0);
+  const fossilCountRef = useRef(0);
+  const heartsRef = useRef(PHYSICS.MAX_HEARTS);
+  const streakRef = useRef(0);
+  const streakTimer = useRef(0);
+  const lastObstacleTime = useRef(0);
+  const lastFossilTime = useRef(0);
+  const nextId = useRef(0);
   const stumblingRef = useRef(false);
+  const invincibleRef = useRef(false);
+  const invincibleEnd = useRef(0);
   const factsRef = useRef<number[]>([]);
+  const completedRef = useRef(false);
+  const popupId = useRef(0);
+  const stumbleCount = useRef(0);
+  const prevLanded = useRef(false);
+  const milestonesShown = useRef(new Set<number>());
+  const lastWhooshTime = useRef(0);
+  const fossilPatternStep = useRef(0);
+  const factEggSpawnedAt = useRef(new Set<number>());
+  const passedBest = useRef(false);
+  const scoreRef = useRef(0);
+
+  // --- Systems ---
+  const { poll } = useGameInput(gameStarted && !gameOver);
+  const physics = useGamePhysics();
+  const { shake, style: shakeStyle } = useScreenShake();
+  const { particles, emitDust, emitSparkle, emitImpact } = useParticles();
 
   // Countdown
-  useEffect(() => {
+  React.useEffect(() => {
     if (countdown > 0) {
+      GameAudio.countdownBeep();
       const t = setTimeout(() => setCountdown(c => c - 1), 800);
       return () => clearTimeout(t);
-    } else {
+    } else if (!gameStarted) {
+      GameAudio.countdownGo();
       setGameStarted(true);
-      startTimeRef.current = Date.now();
     }
-  }, [countdown]);
+  }, [countdown, gameStarted]);
 
-  const jump = useCallback(() => {
-    if (dinoYRef.current <= 0 && !stumblingRef.current) {
-      velocityRef.current = JUMP_VELOCITY;
-      setIsJumping(true);
-    }
+  const getSpeed = useCallback((elapsed: number) => {
+    const t = Math.min(elapsed / PHYSICS.GAME_DURATION, 1);
+    return PHYSICS.GAME_SPEED_BASE + t * (PHYSICS.GAME_SPEED_MAX - PHYSICS.GAME_SPEED_BASE);
   }, []);
 
-  // Input handlers
-  useEffect(() => {
-    if (!gameStarted) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.code === 'Space' || e.code === 'ArrowUp') {
-        e.preventDefault();
-        jump();
-      }
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [gameStarted, jump]);
+  const getObstacleInterval = useCallback((elapsed: number) => {
+    const t = Math.min(elapsed / PHYSICS.GAME_DURATION, 1);
+    return PHYSICS.OBSTACLE_INTERVAL_START - t * (PHYSICS.OBSTACLE_INTERVAL_START - PHYSICS.OBSTACLE_INTERVAL_MIN);
+  }, []);
 
-  const handleTap = useCallback(() => {
-    if (gameStarted) jump();
-  }, [gameStarted, jump]);
+  const getFossilY = useCallback((elapsed: number): number => {
+    const step = fossilPatternStep.current++;
+    const pattern = step % 10;
+    const t = elapsed / PHYSICS.GAME_DURATION;
+    if (t < 0.15) return 0; // First 6s: ground only
+    // Arc: ground → rising → peak → falling → ground, then 3 ground-level in a row
+    const arcHeight = t > 0.5 ? -5 : -3.5;
+    if (pattern <= 4) { // 5-fossil arc
+      const arc = [0, -1.5, arcHeight, -1.5, 0];
+      return arc[pattern];
+    }
+    return 0; // Ground-level run (5 fossils)
+  }, []);
 
-  // Main game loop
-  useEffect(() => {
-    if (!gameStarted) return;
+  const addScorePopup = useCallback((x: number, y: number, text: string, color: string) => {
+    const id = popupId.current++;
+    setScorePopups(prev => [...prev, { id, x, y, text, color }]);
+    setTimeout(() => setScorePopups(prev => prev.filter(p => p.id !== id)), 600);
+  }, []);
 
-    let animId: number;
-    const obstaclesArr: Obstacle[] = [];
-    const eggsArr: Egg[] = [];
-    let dist = 0;
+  const getCurrentScore = useCallback(() => {
+    const multiplier = getStreakMultiplier(streakRef.current);
+    return fossilCountRef.current * PHYSICS.FOSSIL_VALUE * multiplier + factsRef.current.length * PHYSICS.FACT_EGG_VALUE;
+  }, []);
 
-    const loop = () => {
-      const now = Date.now();
-      const elapsed = now - startTimeRef.current;
+  const endGame = useCallback(() => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    const score = getCurrentScore();
+    setFinalScore(score);
+    if (score > bestScore) {
+      saveBestScore(score);
+    }
+    setGameOver(true);
+    GameAudio.gameOver();
+  }, [bestScore, getCurrentScore]);
 
-      // End game
-      if (elapsed > GAME_DURATION) {
-        onComplete(factsRef.current, Math.floor(dist));
-        return;
-      }
+  // --- Main Game Tick ---
+  const onTick = useCallback((dt: number, elapsed: number): boolean => {
+    if (completedRef.current) return false;
 
-      const speed = GAME_SPEED_BASE + (elapsed / GAME_DURATION) * 1.5;
+    // Timer end (secondary)
+    if (elapsed > PHYSICS.GAME_DURATION) {
+      endGame();
+      return false;
+    }
 
-      // Physics
-      velocityRef.current += GRAVITY;
-      dinoYRef.current += velocityRef.current;
-      if (dinoYRef.current >= 0) {
-        dinoYRef.current = 0;
-        velocityRef.current = 0;
-        setIsJumping(false);
-      }
-      setDinoY(dinoYRef.current);
+    const now = performance.now();
+    const speed = getSpeed(elapsed);
+    setGameElapsed(elapsed);
+    setCurrentSpeed(speed);
 
-      dist += speed * 0.1;
-      setDistance(Math.floor(dist));
+    // Invincibility expiry
+    if (invincibleRef.current && now > invincibleEnd.current) {
+      invincibleRef.current = false;
+      setInvincible(false);
+    }
 
-      // Spawn obstacles
-      if (now - lastObstacleRef.current > OBSTACLE_INTERVAL) {
-        const types: ('rock' | 'log' | 'river')[] = ['rock', 'log', 'river'];
-        const type = types[Math.floor(Math.random() * types.length)];
-        obstaclesArr.push({
-          id: obstacleIdRef.current++,
-          x: 110,
-          type,
-          width: type === 'river' ? 8 : 5,
-          height: type === 'log' ? 3 : 5,
-        });
-        lastObstacleRef.current = now;
-      }
+    // Input & physics
+    const input = poll();
+    const maskedInput = stumblingRef.current
+      ? { jumpPressed: false, jumpHeld: false, jumpReleased: true }
+      : input;
+    const state = physics.tick(maskedInput, dt);
+    setPhysicsState(state);
 
-      // Spawn eggs
-      if (now - lastEggRef.current > EGG_INTERVAL) {
-        const availableFacts = dino.facts
-          .map((_, i) => i)
-          .filter(i => !factsRef.current.includes(i));
-        if (availableFacts.length > 0) {
-          const factIndex = availableFacts[Math.floor(Math.random() * availableFacts.length)];
-          eggsArr.push({
-            id: obstacleIdRef.current++,
-            x: 110,
-            y: Math.random() > 0.5 ? -5 : 0,
-            collected: false,
-            factIndex,
-          });
+    if (state.justJumped) GameAudio.jump();
+    if (state.justLanded && !prevLanded.current) {
+      emitDust(12, 25);
+      GameAudio.land();
+    }
+    prevLanded.current = state.justLanded;
+
+    dist.current += speed * 0.1;
+
+    // --- Streak timeout ---
+    if (streakRef.current > 0 && now - streakTimer.current > PHYSICS.STREAK_TIMEOUT) {
+      streakRef.current = 0;
+      setStreak(0);
+    }
+
+    // --- Spawn obstacles ---
+    const obsInterval = getObstacleInterval(elapsed);
+    if (now - lastObstacleTime.current > obsInterval) {
+      const type: ObstacleType = Math.random() > 0.4 ? 'rock' : 'log';
+      obstaclesArr.current.push({ id: nextId.current++, x: 110, type, width: 5, height: type === 'log' ? 3 : 5 });
+      lastObstacleTime.current = now;
+    }
+
+    // --- Spawn fossils ---
+    if (now - lastFossilTime.current > PHYSICS.FOSSIL_SPAWN_INTERVAL) {
+      fossilsArr.current.push({ id: nextId.current++, x: 110, y: getFossilY(elapsed), collected: false });
+      lastFossilTime.current = now;
+    }
+
+    // --- Spawn fact eggs at fixed times ---
+    for (const spawnTime of PHYSICS.FACT_EGG_SPAWN_TIMES) {
+      if (elapsed >= spawnTime && !factEggSpawnedAt.current.has(spawnTime)) {
+        factEggSpawnedAt.current.add(spawnTime);
+        const available = dino.facts.map((_, i) => i).filter(i => !factsRef.current.includes(i));
+        if (available.length > 0) {
+          const factIndex = available[Math.floor(Math.random() * available.length)];
+          eggsArr.current.push({ id: nextId.current++, x: 110, y: -3, collected: false, factIndex });
         }
-        lastEggRef.current = now;
       }
+    }
 
-      // Move obstacles
-      for (let i = obstaclesArr.length - 1; i >= 0; i--) {
-        obstaclesArr[i].x -= speed * 0.5;
-        if (obstaclesArr[i].x < -20) obstaclesArr.splice(i, 1);
-      }
+    // --- Move everything ---
+    const mv = speed * 0.5;
+    for (let i = obstaclesArr.current.length - 1; i >= 0; i--) { obstaclesArr.current[i].x -= mv; if (obstaclesArr.current[i].x < -20) obstaclesArr.current.splice(i, 1); }
+    for (let i = fossilsArr.current.length - 1; i >= 0; i--) { fossilsArr.current[i].x -= mv; if (fossilsArr.current[i].x < -10) fossilsArr.current.splice(i, 1); }
+    for (let i = eggsArr.current.length - 1; i >= 0; i--) { eggsArr.current[i].x -= mv; if (eggsArr.current[i].x < -10) eggsArr.current.splice(i, 1); }
 
-      // Move eggs
-      for (let i = eggsArr.length - 1; i >= 0; i--) {
-        eggsArr[i].x -= speed * 0.5;
-        if (eggsArr[i].x < -10) eggsArr.splice(i, 1);
-      }
+    // --- Obstacle collisions ---
+    const dinoLeft = 10, dinoRight = 18;
+    for (const obs of obstaclesArr.current) {
+      if (stumblingRef.current || obs.destroying || invincibleRef.current) continue;
+      if (obs.x >= dinoRight || obs.x + obs.width <= dinoLeft) continue;
 
-      // Collision with obstacles (generous hitbox)
-      const dinoLeft = 10;
-      const dinoRight = 18;
-      const dinoTop = GROUND_Y + dinoYRef.current * 0.3 - 10;
+      if (state.y > PHYSICS.JUMP_CLEARANCE) {
+        // HIT!
+        heartsRef.current--;
+        setHearts(heartsRef.current);
+        setHeartLostIndex(heartsRef.current); // Index of heart that was just lost
 
-      for (const obs of obstaclesArr) {
-        if (
-          !stumblingRef.current &&
-          obs.x < dinoRight &&
-          obs.x + obs.width > dinoLeft &&
-          dinoYRef.current > -6
-        ) {
-          stumblingRef.current = true;
-          setIsStumbling(true);
-          setTimeout(() => {
-            stumblingRef.current = false;
-            setIsStumbling(false);
-          }, 600);
-          // Remove the obstacle
-          const idx = obstaclesArr.indexOf(obs);
-          if (idx > -1) obstaclesArr.splice(idx, 1);
+        // Scatter fossils visually
+        const scatterCount = Math.min(PHYSICS.SCATTER_COUNT, fossilCountRef.current);
+        if (scatterCount > 0) {
+          const half = Math.floor(fossilCountRef.current / 2);
+          fossilCountRef.current -= half;
+          setFossilCount(fossilCountRef.current);
+          setScatterFossils(Array.from({ length: scatterCount }, (_, i) => ({ id: nextId.current++, variant: (i % 8) + 1 })));
+          setTimeout(() => setScatterFossils([]), PHYSICS.SCATTER_DURATION);
+        }
+
+        // Reset streak
+        streakRef.current = 0;
+        setStreak(0);
+
+        // Stumble + invincibility
+        stumblingRef.current = true;
+        setIsStumbling(true);
+        invincibleRef.current = true;
+        invincibleEnd.current = now + PHYSICS.HIT_INVINCIBILITY;
+        setInvincible(true);
+
+        shake(12, 400);
+        GameAudio.heartLost();
+        emitImpact(obs.x, 26);
+
+        obs.destroying = true;
+        setTimeout(() => { const idx = obstaclesArr.current.indexOf(obs); if (idx > -1) obstaclesArr.current.splice(idx, 1); }, 400);
+        setTimeout(() => { stumblingRef.current = false; setIsStumbling(false); }, PHYSICS.STUMBLE_DURATION);
+
+        stumbleCount.current++;
+
+        if (heartsRef.current <= 0) {
+          setTimeout(() => endGame(), 300);
           break;
         }
+        break;
       }
 
-      // Collect eggs
-      for (const egg of eggsArr) {
-        if (
-          !egg.collected &&
-          egg.x < dinoRight + 3 &&
-          egg.x > dinoLeft - 3 &&
-          Math.abs((GROUND_Y + dinoYRef.current * 0.3) - (GROUND_Y + egg.y)) < 15
-        ) {
-          egg.collected = true;
-          factsRef.current = [...factsRef.current, egg.factIndex];
-          setFactsCollected([...factsRef.current]);
-          setShowFact(dino.facts[egg.factIndex].text);
-          setTimeout(() => setShowFact(null), 2500);
+      // Near miss
+      if (state.y <= PHYSICS.JUMP_CLEARANCE && state.y > PHYSICS.JUMP_CLEARANCE - 2) {
+        GameAudio.nearMiss();
+        setNearMiss(true);
+        addScorePopup(obs.x, 32, 'CLOSE!', '#FF6B35');
+        setTimeout(() => setNearMiss(false), 600);
+      }
+    }
+
+    // Whoosh cue
+    for (const obs of obstaclesArr.current) {
+      if (!obs.destroying && obs.x > 22 && obs.x < 28 && now - lastWhooshTime.current > 1500) {
+        GameAudio.whoosh();
+        lastWhooshTime.current = now;
+        break;
+      }
+    }
+
+    // Speed milestones
+    for (const pct of [25, 50, 75]) {
+      if (!milestonesShown.current.has(pct) && (elapsed / PHYSICS.GAME_DURATION) * 100 >= pct) {
+        milestonesShown.current.add(pct);
+        GameAudio.speedUp();
+        setSpeedMilestone('Faster!');
+        setTimeout(() => setSpeedMilestone(null), 1200);
+      }
+    }
+
+    // --- Collect fossils ---
+    for (const fossil of fossilsArr.current) {
+      if (fossil.collected) continue;
+      if (fossil.x < dinoRight + 2 && fossil.x > dinoLeft - 2 && Math.abs(state.y * 0.3 - fossil.y) < 10) {
+        fossil.collected = true;
+        fossil.popping = true;
+
+        // Streak
+        streakRef.current++;
+        streakTimer.current = now;
+        setStreak(streakRef.current);
+
+        const multiplier = getStreakMultiplier(streakRef.current);
+        const points = PHYSICS.FOSSIL_VALUE * multiplier;
+        fossilCountRef.current += points;
+        setFossilCount(fossilCountRef.current);
+
+        // Ascending pitch!
+        GameAudio.fossilCollect(streakRef.current - 1);
+
+        // Score popup
+        const text = multiplier > 1 ? `+${points}` : '+1';
+        addScorePopup(fossil.x, 30 + fossil.y, text, multiplier > 1 ? '#FF6B35' : '#E8A030');
+
+        // Score bump animation
+        setScoreBump(true);
+        setTimeout(() => setScoreBump(false), 250);
+
+        // Update running score and check best
+        scoreRef.current = getCurrentScore();
+        if (!passedBest.current && scoreRef.current > bestScore && bestScore > 0) {
+          passedBest.current = true;
+          GameAudio.newBest();
+          setNewBestFlash(true);
+          setTimeout(() => setNewBestFlash(false), 1500);
         }
       }
+    }
 
-      setObstacles([...obstaclesArr]);
-      setEggs([...eggsArr]);
+    // --- Collect fact eggs ---
+    for (const egg of eggsArr.current) {
+      if (egg.collected || factsRef.current.includes(egg.factIndex)) continue;
+      if (egg.x < dinoRight + 3 && egg.x > dinoLeft - 3 && Math.abs(state.y * 0.3 - egg.y) < 12) {
+        egg.collected = true;
+        factsRef.current = [...factsRef.current, egg.factIndex];
+        setFactsCollected([...factsRef.current]);
+        setShowFact(dino.facts[egg.factIndex].text);
+        setTimeout(() => setShowFact(null), 3500);
+        GameAudio.eggCollect();
+        emitSparkle(egg.x, 30 + egg.y);
+        addScorePopup(egg.x, 32 + egg.y, `+${PHYSICS.FACT_EGG_VALUE}`, '#FFD700');
+        setScoreBump(true);
+        setTimeout(() => setScoreBump(false), 250);
+      }
+    }
 
-      animId = requestAnimationFrame(loop);
-    };
+    setObstacles([...obstaclesArr.current]);
+    setFossils([...fossilsArr.current]);
+    setEggs([...eggsArr.current]);
 
-    animId = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(animId);
-  }, [gameStarted, dino, onComplete]);
+    return true;
+  }, [dino, poll, physics, getSpeed, getObstacleInterval, getFossilY, shake, emitDust, emitSparkle, emitImpact, addScorePopup, endGame, getCurrentScore, bestScore]);
+
+  useGameLoop(gameStarted && !gameOver, onTick);
+
+  // Retry handler
+  const handleRetry = useCallback(() => {
+    onComplete({
+      factsCollected: factsRef.current,
+      distance: Math.floor(dist.current),
+      fossils: fossilCountRef.current,
+      score: finalScore,
+      stumbles: stumbleCount.current,
+    });
+  }, [onComplete, finalScore]);
+
+  const dinoBottom = 25 + (-physicsState.y * 0.5);
+  const { scaleX, scaleY } = physicsState.squash;
+  const multiplier = getStreakMultiplier(streak);
+  const displayScore = fossilCount * PHYSICS.FOSSIL_VALUE + factsCollected.length * PHYSICS.FACT_EGG_VALUE;
 
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full h-screen overflow-hidden cursor-pointer select-none"
-      onClick={handleTap}
-      onTouchStart={handleTap}
-    >
-      {/* Sky */}
-      <div className="absolute inset-0 bg-gradient-to-b from-dino-sky via-dino-skyLight to-dino-skyLight" />
-
-      {/* Clouds - parallax */}
-      <div className="absolute top-[8%] animate-cloud-drift" style={{ left: `${(Date.now() / 80) % 200 - 50}%` }}>
-        <div className="w-20 h-8 bg-white/50 rounded-full" />
-      </div>
-      <div className="absolute top-[15%] animate-cloud-drift-slow" style={{ left: `${(Date.now() / 120) % 200 - 30}%` }}>
-        <div className="w-28 h-10 bg-white/40 rounded-full" />
-      </div>
-
-      {/* Mountains - far bg */}
-      <div className="absolute bottom-[25%] left-0 right-0">
-        <svg viewBox="0 0 800 100" className="w-full" preserveAspectRatio="none">
-          <path d="M0 100 L100 30 L200 70 L350 10 L500 50 L600 20 L750 60 L800 40 L800 100 Z" fill="#7BA67B" opacity="0.5" />
-        </svg>
-      </div>
-
-      {/* Volcano */}
-      <div className="absolute bottom-[25%] right-[15%]">
-        <svg width="120" height="100" viewBox="0 0 120 100">
-          <path d="M20 100 L50 20 Q60 5 70 20 L100 100 Z" fill="#8B7355" />
-          <path d="M52 22 Q60 10 68 22" fill="#FF6B35" opacity="0.7" />
-          <ellipse cx="60" cy="8" rx="8" ry="5" fill="#FF4500" opacity="0.3" className="animate-pulse" />
-        </svg>
-      </div>
-
-      {/* Trees - mid bg */}
-      <div className="absolute bottom-[22%] left-[5%]">
-        <svg width="40" height="60" viewBox="0 0 40 60">
-          <rect x="17" y="35" width="6" height="25" fill="#8B6B3B" />
-          <ellipse cx="20" cy="25" rx="18" ry="25" fill="#4A8C3F" />
-        </svg>
-      </div>
-      <div className="absolute bottom-[22%] left-[35%]">
-        <svg width="30" height="50" viewBox="0 0 30 50">
-          <rect x="12" y="30" width="5" height="20" fill="#8B6B3B" />
-          <path d="M15 0 L0 30 L30 30 Z" fill="#3A7C2F" />
-        </svg>
-      </div>
-      <div className="absolute bottom-[22%] right-[40%]">
-        <svg width="35" height="55" viewBox="0 0 35 55">
-          <rect x="14" y="32" width="6" height="23" fill="#8B6B3B" />
-          <ellipse cx="17" cy="22" rx="16" ry="22" fill="#5A9C4F" />
-        </svg>
-      </div>
-
-      {/* Ground */}
-      <div className="absolute bottom-0 left-0 right-0 h-[25%] bg-dino-grass">
-        <div className="absolute top-0 left-0 right-0 h-3 bg-dino-grassDark" />
-        {/* Ground details */}
-        <div className="absolute top-2 left-[10%] w-3 h-4 bg-dino-grassDark rounded-t-full opacity-60" />
-        <div className="absolute top-2 left-[30%] w-2 h-3 bg-dino-grassDark rounded-t-full opacity-40" />
-        <div className="absolute top-2 left-[60%] w-3 h-5 bg-dino-grassDark rounded-t-full opacity-50" />
-        <div className="absolute top-2 left-[80%] w-2 h-3 bg-dino-grassDark rounded-t-full opacity-60" />
-      </div>
+    <div className={`relative w-full h-screen overflow-hidden cursor-pointer select-none ${streak >= PHYSICS.STREAK_X2 ? 'animate-streak-glow' : ''}`} style={shakeStyle}>
+      <ParallaxBackground speed={currentSpeed} elapsed={gameElapsed} />
+      <ParticleRenderer particles={particles} />
 
       {/* Countdown */}
       {!gameStarted && (
@@ -292,117 +410,193 @@ export const RunnerGame: React.FC<Props> = ({ dino, onComplete, onBack }) => {
         </div>
       )}
 
-      {/* Dinosaur */}
+      {/* Dino */}
       <div
-        className="absolute z-20 transition-none"
-        style={{
-          left: '10%',
-          bottom: `${25 + (-dinoY * 0.5)}%`,
-        }}
+        className={`absolute z-20 transition-none ${invincible ? 'animate-invincible' : ''}`}
+        style={{ left: '10%', bottom: `${dinoBottom}%`, transform: `scaleX(${scaleX}) scaleY(${scaleY})`, transformOrigin: 'bottom center' }}
       >
-        <DinoSVG
-          dino={dino}
-          size={70}
-          isRunning={gameStarted && !isStumbling}
-          isJumping={isJumping}
-          isStumbling={isStumbling}
-        />
+        <DinoSVG dino={dino} size={70} isRunning={gameStarted && !isStumbling} isJumping={physicsState.isJumping} isStumbling={isStumbling} />
       </div>
 
       {/* Obstacles */}
       {obstacles.map(obs => (
-        <div
-          key={obs.id}
-          className="absolute z-10"
-          style={{
-            left: `${obs.x}%`,
-            bottom: '25%',
-          }}
-        >
-          {obs.type === 'rock' && (
-            <svg width="50" height="40" viewBox="0 0 50 40">
-              <path d="M5 40 L15 10 L25 5 L35 8 L45 15 L48 40 Z" fill="#8B8B8B" />
-              <path d="M15 10 L25 5 L30 15 L20 18 Z" fill="#9B9B9B" />
-            </svg>
-          )}
-          {obs.type === 'log' && (
-            <svg width="60" height="30" viewBox="0 0 60 30">
-              <ellipse cx="30" cy="20" rx="28" ry="10" fill="#8B6B3B" />
-              <ellipse cx="30" cy="18" rx="28" ry="8" fill="#A0825A" />
-              <ellipse cx="5" cy="20" rx="5" ry="10" fill="#7B5B2B" />
-              <circle cx="10" cy="18" r="3" fill="#6B4B1B" />
-            </svg>
-          )}
-          {obs.type === 'river' && (
-            <svg width="80" height="20" viewBox="0 0 80 20">
-              <rect x="0" y="0" width="80" height="20" rx="3" fill="#4A9BD9" opacity="0.7" />
-              <path d="M5 8 Q15 4 25 8 Q35 12 45 8 Q55 4 65 8 Q75 12 80 8" fill="none" stroke="white" strokeWidth="1.5" opacity="0.5" />
-            </svg>
+        <div key={obs.id} className={`absolute z-10 ${obs.destroying ? 'animate-obstacle-break' : ''}`} style={{ left: `${obs.x}%`, bottom: '25%' }}>
+          {obs.type === 'rock' ? (
+            <svg width="50" height="40" viewBox="0 0 50 40"><path d="M5 40 L15 10 L25 5 L35 8 L45 15 L48 40 Z" fill="#8B8B8B"/><path d="M15 10 L25 5 L30 15 L20 18 Z" fill="#9B9B9B"/></svg>
+          ) : (
+            <svg width="60" height="30" viewBox="0 0 60 30"><ellipse cx="30" cy="20" rx="28" ry="10" fill="#8B6B3B"/><ellipse cx="30" cy="18" rx="28" ry="8" fill="#A0825A"/><ellipse cx="5" cy="20" rx="5" ry="10" fill="#7B5B2B"/></svg>
           )}
         </div>
       ))}
 
-      {/* Eggs */}
-      {eggs.map(egg =>
-        !egg.collected ? (
-          <div
-            key={egg.id}
-            className="absolute z-15 animate-egg-float"
-            style={{
-              left: `${egg.x}%`,
-              bottom: `${30 + egg.y}%`,
-            }}
-          >
-            <svg width="30" height="35" viewBox="0 0 30 35">
-              <ellipse cx="15" cy="18" rx="12" ry="16" fill="#FFD700" />
-              <ellipse cx="15" cy="14" rx="8" ry="10" fill="#FFE44D" opacity="0.6" />
-              <text x="15" y="22" textAnchor="middle" fontSize="12">🥚</text>
+      {/* Fossils — bright amber ammonite spirals */}
+      {fossils.map(f =>
+        !f.collected ? (
+          <div key={f.id} className="absolute z-14" style={{ left: `${f.x}%`, bottom: `${29 + f.y}%` }}>
+            <svg width="18" height="18" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="9" fill="#E8A030" />
+              <path d="M10 3 Q15 5 14 10 Q13 14 10 15 Q7 14 6 10 Q5 7 7 5" fill="none" stroke="#C47820" strokeWidth="1.5" />
+              <circle cx="10" cy="10" r="2.5" fill="#D49028" />
+            </svg>
+          </div>
+        ) : f.popping ? (
+          <div key={f.id} className="absolute z-14 animate-fossil-pop" style={{ left: `${f.x}%`, bottom: `${29 + f.y}%` }}>
+            <svg width="18" height="18" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="9" fill="#E8A030" />
             </svg>
           </div>
         ) : null
       )}
 
-      {/* Fact popup */}
+      {/* Fact eggs — golden, glowing, rare */}
+      {eggs.map(egg =>
+        !egg.collected ? (
+          <div key={egg.id} className="absolute z-15 animate-egg-float" style={{ left: `${egg.x}%`, bottom: `${30 + egg.y}%` }}>
+            <div className="relative">
+              <svg width="32" height="38" viewBox="0 0 30 35">
+                <ellipse cx="15" cy="18" rx="13" ry="17" fill="#FFD700" />
+                <ellipse cx="15" cy="14" rx="9" ry="11" fill="#FFE44D" opacity="0.6" />
+                <text x="15" y="23" textAnchor="middle" fontSize="14" fill="#B8860B">?</text>
+              </svg>
+              <div className="absolute inset-0 rounded-full animate-pulse" style={{ boxShadow: '0 0 15px 5px rgba(255, 215, 0, 0.5)' }} />
+            </div>
+          </div>
+        ) : null
+      )}
+
+      {/* Fossil scatter on hit */}
+      {scatterFossils.length > 0 && (
+        <div className="absolute z-25 pointer-events-none" style={{ left: '12%', bottom: `${dinoBottom}%` }}>
+          {scatterFossils.map(sf => (
+            <div key={sf.id} className={`absolute animate-fossil-scatter-${sf.variant}`}>
+              <svg width="14" height="14" viewBox="0 0 20 20"><circle cx="10" cy="10" r="8" fill="#E8A030" opacity="0.8" /></svg>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Score popups */}
+      {scorePopups.map(p => (
+        <div key={p.id} className="absolute z-30 pointer-events-none animate-score-float" style={{ left: `${p.x}%`, bottom: `${p.y}%` }}>
+          <span className="text-lg font-extrabold drop-shadow-lg" style={{ color: p.color }}>{p.text}</span>
+        </div>
+      ))}
+
+      {nearMiss && (
+        <div className="absolute top-[40%] left-1/2 -translate-x-1/2 z-30 animate-near-miss">
+          <span className="text-4xl font-extrabold text-dino-orange drop-shadow-[0_2px_0_rgba(0,0,0,0.3)]">CLOSE!</span>
+        </div>
+      )}
+
+      {speedMilestone && (
+        <div className="absolute top-[45%] left-1/2 -translate-x-1/2 z-30 animate-speed-flash">
+          <span className="text-3xl font-extrabold text-white drop-shadow-[0_2px_0_rgba(0,0,0,0.3)]">{speedMilestone}</span>
+        </div>
+      )}
+
+      {newBestFlash && (
+        <div className="absolute top-[35%] left-1/2 -translate-x-1/2 z-30 animate-new-best">
+          <span className="text-4xl font-extrabold text-dino-title drop-shadow-[0_3px_0_rgba(0,0,0,0.3)]">NEW BEST!</span>
+        </div>
+      )}
+
+      {/* Fact banner */}
       {showFact && (
-        <div className="absolute top-[15%] left-1/2 -translate-x-1/2 z-30 bg-white/95 rounded-3xl px-6 py-4 max-w-sm shadow-xl animate-scale-in">
-          <p className="text-lg font-bold text-center" style={{ color: dino.color }}>
-            {showFact}
-          </p>
+        <div className="absolute top-[12%] left-1/2 -translate-x-1/2 z-30 animate-scale-in">
+          <div className="bg-white/95 rounded-2xl px-6 py-3 max-w-md shadow-xl border-2 border-dino-eggYellow">
+            <p className="text-lg font-bold text-center" style={{ color: dino.color }}>{showFact}</p>
+          </div>
         </div>
       )}
 
       {/* HUD */}
-      <div className="absolute top-4 left-4 right-4 flex justify-between items-start z-20">
-        <button
-          onClick={(e) => { e.stopPropagation(); onBack(); }}
-          className="px-3 py-2 text-sm font-bold bg-white/80 rounded-xl shadow"
-        >
-          ✕
-        </button>
-        <div className="flex items-center gap-4">
-          <div className="bg-white/80 rounded-xl px-4 py-2 shadow">
-            <span className="text-lg font-bold">🏃 {distance}m</span>
+      <div className="absolute top-3 left-3 right-3 flex justify-between items-start z-20">
+        <div className="flex gap-2">
+          <button onClick={(e) => { e.stopPropagation(); onBack(); }} className="px-2.5 py-1.5 text-sm font-bold bg-white/80 rounded-xl shadow">{'✕'}</button>
+          <button onClick={(e) => { e.stopPropagation(); setIsMuted(GameAudio.toggleMute()); }} className="px-2.5 py-1.5 text-sm font-bold bg-white/80 rounded-xl shadow">{isMuted ? '🔇' : '🔊'}</button>
+        </div>
+
+        <div className="flex flex-col items-end gap-1">
+          {/* Hearts */}
+          <div className="flex gap-1">
+            {Array.from({ length: PHYSICS.MAX_HEARTS }).map((_, i) => (
+              <span key={i} className={`text-xl ${i >= hearts ? (i === heartLostIndex ? 'animate-heart-lost' : 'opacity-20 grayscale') : ''}`}>
+                🥚
+              </span>
+            ))}
           </div>
-          <div className="bg-white/80 rounded-xl px-4 py-2 shadow">
-            <span className="text-lg font-bold">🥚 {factsCollected.length}/{dino.facts.length}</span>
+
+          {/* Score + streak */}
+          <div className="flex items-center gap-2">
+            {multiplier > 1 && (
+              <div className="bg-dino-orange/90 text-white text-xs font-extrabold px-2 py-0.5 rounded-lg">
+                x{multiplier}
+              </div>
+            )}
+            <div className={`bg-white/90 rounded-xl px-3 py-1 shadow ${scoreBump ? 'animate-score-bump' : ''}`}>
+              <span className="text-lg font-extrabold">{displayScore}</span>
+            </div>
+          </div>
+
+          {/* Best score */}
+          <div className="text-xs font-bold text-white/60">
+            BEST: {Math.max(bestScore, displayScore)}
           </div>
         </div>
       </div>
 
-      {/* Tap hint */}
-      {gameStarted && distance < 5 && (
-        <div className="absolute bottom-[35%] left-1/2 -translate-x-1/2 z-20 animate-pulse">
-          <p className="text-2xl font-bold text-white drop-shadow-lg">👆 Tap to Jump!</p>
+      {/* Hint */}
+      {gameStarted && !gameOver && dist.current < 5 && (
+        <div className="absolute bottom-[35%] left-1/2 -translate-x-1/2 z-20">
+          <p className="text-2xl font-bold text-white drop-shadow-lg animate-pulse">Tap to Jump!</p>
         </div>
       )}
 
       {/* Progress bar */}
-      <div className="absolute bottom-[25.5%] left-0 right-0 h-2 bg-black/10 z-20">
-        <div
-          className="h-full bg-dino-orange transition-all duration-300"
-          style={{ width: `${gameStarted ? Math.min(100, ((Date.now() - startTimeRef.current) / GAME_DURATION) * 100) : 0}%` }}
-        />
+      <div className="absolute bottom-[25.5%] left-0 right-0 h-1.5 bg-black/10 z-20">
+        <div className="h-full bg-dino-orange/60 transition-all duration-500" style={{ width: `${gameStarted ? Math.min(100, (gameElapsed / PHYSICS.GAME_DURATION) * 100) : 0}%` }} />
       </div>
+
+      {/* === GAME OVER OVERLAY === */}
+      {gameOver && (
+        <div
+          className="absolute inset-0 z-50 flex flex-col items-center justify-center animate-game-over cursor-pointer"
+          onClick={handleRetry}
+          onTouchStart={handleRetry}
+        >
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative z-10 flex flex-col items-center">
+            <p className="text-6xl font-extrabold text-white drop-shadow-lg mb-2">
+              {finalScore > bestScore ? '🏆 NEW BEST!' : 'GAME OVER'}
+            </p>
+            <p className="text-5xl font-extrabold text-dino-title drop-shadow-lg mb-4">{finalScore}</p>
+
+            <div className="flex gap-6 mb-6">
+              <div className="text-center">
+                <p className="text-2xl font-bold text-white">{fossilCount}</p>
+                <p className="text-xs text-white/60">Fossils</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-white">🥚 {factsCollected.length}</p>
+                <p className="text-xs text-white/60">Facts</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-white">{Math.floor(dist.current)}m</p>
+                <p className="text-xs text-white/60">Distance</p>
+              </div>
+            </div>
+
+            <p className="text-3xl font-extrabold text-white animate-pulse mb-8">TAP TO RETRY</p>
+
+            <button
+              onClick={(e) => { e.stopPropagation(); onBack(); }}
+              className="px-6 py-2 text-sm font-bold bg-white/30 text-white rounded-xl hover:bg-white/50 transition-all"
+            >
+              Home
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

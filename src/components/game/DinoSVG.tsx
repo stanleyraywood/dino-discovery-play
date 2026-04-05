@@ -7,6 +7,7 @@ interface DinoSVGProps {
   isRunning?: boolean;
   isJumping?: boolean;
   isStumbling?: boolean;
+  isDucking?: boolean;
   className?: string;
 }
 
@@ -128,17 +129,17 @@ const LongneckDino: React.FC<{ color: string; bodyColor: string; size: number }>
   </svg>
 );
 
-export const DinoSVG: React.FC<DinoSVGProps> = ({ 
-  dino, 
-  size = 80, 
-  isRunning = false, 
+export const DinoSVG: React.FC<DinoSVGProps> = ({
+  dino,
+  size = 80,
+  isRunning = false,
   isJumping = false,
   isStumbling = false,
-  className = '' 
+  isDucking = false,
+  className = ''
 }) => {
   const animClass = [
-    isRunning && !isJumping && !isStumbling ? 'animate-dino-run' : '',
-    isJumping ? 'animate-dino-jump' : '',
+    isRunning && !isJumping && !isStumbling && !isDucking ? 'animate-dino-run' : '',
     isStumbling ? 'animate-dino-stumble' : '',
     className,
   ].filter(Boolean).join(' ');
@@ -150,8 +151,13 @@ export const DinoSVG: React.FC<DinoSVGProps> = ({
     longneck: LongneckDino,
   }[dino.svgType];
 
+  // Duck: flatten the dino visually
+  const duckStyle: React.CSSProperties = isDucking
+    ? { transform: 'scaleX(1.2) scaleY(0.55)', transformOrigin: 'bottom center' }
+    : {};
+
   return (
-    <div className={animClass} style={{ width: size, height: size }}>
+    <div className={animClass} style={{ width: size, height: size, ...duckStyle }}>
       <Component color={dino.color} bodyColor={dino.bodyColor} size={size} />
     </div>
   );

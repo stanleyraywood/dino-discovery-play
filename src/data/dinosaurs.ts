@@ -3,6 +3,17 @@ export interface DinoFact {
   category: 'diet' | 'size' | 'era' | 'fun';
 }
 
+export type AbilityType = 'roar' | 'charge' | 'glide' | 'dash' | 'stomp' | 'tailwhip' | 'swim' | 'trumpet' | 'whip' | 'armor';
+
+export interface DinoAbility {
+  type: AbilityType;
+  name: string;
+  description: string;
+  cooldown: number;  // ms
+  duration: number;  // ms
+  icon: string;
+}
+
 export interface Dinosaur {
   id: string;
   name: string;
@@ -15,6 +26,7 @@ export interface Dinosaur {
   period: string;
   funQuirk: string;
   svgType: 'biped' | 'quadruped' | 'flyer' | 'longneck';
+  ability: DinoAbility;
 }
 
 export const DINOSAURS: Dinosaur[] = [
@@ -35,6 +47,7 @@ export const DINOSAURS: Dinosaur[] = [
     period: 'Late Cretaceous',
     funQuirk: 'Had tiny arms but a HUGE bite!',
     svgType: 'biped',
+    ability: { type: 'roar', name: 'Roar', description: 'Destroy all obstacles on screen!', cooldown: 12000, duration: 500, icon: '\u{1F4A5}' },
   },
   {
     id: 'triceratops',
@@ -53,6 +66,7 @@ export const DINOSAURS: Dinosaur[] = [
     period: 'Late Cretaceous',
     funQuirk: 'Its name means "three-horned face"!',
     svgType: 'quadruped',
+    ability: { type: 'charge', name: 'Charge', description: 'Immunity for 3 seconds!', cooldown: 15000, duration: 3000, icon: '\u{1F6E1}' },
   },
   {
     id: 'stegosaurus',
@@ -71,6 +85,7 @@ export const DINOSAURS: Dinosaur[] = [
     period: 'Late Jurassic',
     funQuirk: 'Had a tiny brain but was still awesome!',
     svgType: 'quadruped',
+    ability: { type: 'tailwhip', name: 'Tail Whip', description: 'Smash nearby obstacles!', cooldown: 10000, duration: 400, icon: '\u{1F4AB}' },
   },
   {
     id: 'brachiosaurus',
@@ -89,6 +104,7 @@ export const DINOSAURS: Dinosaur[] = [
     period: 'Late Jurassic',
     funQuirk: 'One of the tallest dinosaurs ever!',
     svgType: 'longneck',
+    ability: { type: 'stomp', name: 'Stomp', description: 'Shake the ground and stun obstacles!', cooldown: 12000, duration: 600, icon: '\u{1F463}' },
   },
   {
     id: 'velociraptor',
@@ -107,6 +123,7 @@ export const DINOSAURS: Dinosaur[] = [
     period: 'Late Cretaceous',
     funQuirk: 'Was actually covered in feathers!',
     svgType: 'biped',
+    ability: { type: 'dash', name: 'Dash', description: 'Speed burst and collect nearby eggs!', cooldown: 10000, duration: 1500, icon: '\u{26A1}' },
   },
   {
     id: 'pteranodon',
@@ -125,6 +142,7 @@ export const DINOSAURS: Dinosaur[] = [
     period: 'Late Cretaceous',
     funQuirk: 'Had a cool crest on its head!',
     svgType: 'flyer',
+    ability: { type: 'glide', name: 'Glide', description: 'Float gently for 2 seconds!', cooldown: 8000, duration: 2000, icon: '\u{1F54A}' },
   },
   {
     id: 'ankylosaurus',
@@ -143,6 +161,7 @@ export const DINOSAURS: Dinosaur[] = [
     period: 'Late Cretaceous',
     funQuirk: 'Even its eyelids had armor!',
     svgType: 'quadruped',
+    ability: { type: 'armor', name: 'Armor Up', description: 'Block next 2 hits!', cooldown: 15000, duration: 5000, icon: '\u{1F6E1}' },
   },
   {
     id: 'spinosaurus',
@@ -161,6 +180,7 @@ export const DINOSAURS: Dinosaur[] = [
     period: 'Late Cretaceous',
     funQuirk: 'The biggest meat-eating dinosaur ever!',
     svgType: 'biped',
+    ability: { type: 'swim', name: 'Swim', description: 'Rivers become powerslides!', cooldown: 10000, duration: 3000, icon: '\u{1F30A}' },
   },
   {
     id: 'parasaurolophus',
@@ -179,6 +199,7 @@ export const DINOSAURS: Dinosaur[] = [
     period: 'Late Cretaceous',
     funQuirk: 'Could "sing" through its head crest!',
     svgType: 'biped',
+    ability: { type: 'trumpet', name: 'Trumpet', description: 'Stun flying enemies!', cooldown: 8000, duration: 500, icon: '\u{1F3BA}' },
   },
   {
     id: 'diplodocus',
@@ -197,6 +218,7 @@ export const DINOSAURS: Dinosaur[] = [
     period: 'Late Jurassic',
     funQuirk: 'Could crack its tail like a whip!',
     svgType: 'longneck',
+    ability: { type: 'whip', name: 'Tail Whip', description: 'Crack your tail and clear the way!', cooldown: 10000, duration: 400, icon: '\u{1F4A8}' },
   },
 ];
 

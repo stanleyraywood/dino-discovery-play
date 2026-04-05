@@ -1,14 +1,21 @@
 import React from 'react';
 import { DINOSAURS } from '@/data/dinosaurs';
 import { DinoSVG } from './DinoSVG';
+import { GameAudio } from '@/lib/audio';
 
 interface Props {
   onPlay: () => void;
   onCollection: () => void;
+  onLeaderboard: () => void;
 }
 
-export const WelcomeScreen: React.FC<Props> = ({ onPlay, onCollection }) => {
+export const WelcomeScreen: React.FC<Props> = ({ onPlay, onCollection, onLeaderboard }) => {
   const trex = DINOSAURS[0];
+
+  const handlePlay = () => {
+    GameAudio.init();
+    onPlay();
+  };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-dino-sky via-dino-skyLight to-dino-grass p-4 overflow-hidden">
@@ -29,10 +36,10 @@ export const WelcomeScreen: React.FC<Props> = ({ onPlay, onCollection }) => {
       {/* Title */}
       <div className="relative z-10 mb-4">
         <h1 className="text-6xl md:text-8xl font-extrabold text-dino-title drop-shadow-[0_4px_0_rgba(0,0,0,0.3)] tracking-wider animate-bounce-gentle">
-          DINO RUN!
+          DINO DASH
         </h1>
         <p className="text-xl md:text-2xl text-white font-bold text-center mt-2 drop-shadow-md">
-          🦕 Run, Jump & Learn! 🦖
+          Run. Jump. Discover.
         </p>
       </div>
 
@@ -42,19 +49,27 @@ export const WelcomeScreen: React.FC<Props> = ({ onPlay, onCollection }) => {
       </div>
 
       {/* Buttons */}
-      <div className="relative z-10 flex flex-col gap-4 items-center">
+      <div className="relative z-10 flex flex-col gap-3 items-center">
         <button
-          onClick={onPlay}
+          onClick={handlePlay}
           className="px-12 py-5 text-3xl font-extrabold bg-dino-orange text-white rounded-2xl shadow-[0_6px_0_#c0500a] hover:shadow-[0_4px_0_#c0500a] hover:translate-y-[2px] active:shadow-[0_1px_0_#c0500a] active:translate-y-[5px] transition-all duration-100 transform hover:scale-105"
         >
-          🎮 PLAY!
+          PLAY
         </button>
-        <button
-          onClick={onCollection}
-          className="px-8 py-4 text-xl font-bold bg-dino-purple text-white rounded-2xl shadow-[0_4px_0_#5B3A8B] hover:translate-y-[2px] active:translate-y-[4px] transition-all duration-100 transform hover:scale-105"
-        >
-          📚 My Dinos
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={onLeaderboard}
+            className="px-6 py-3 text-lg font-bold bg-dino-eggYellow text-foreground rounded-2xl shadow-[0_4px_0_#C4A435] hover:translate-y-[2px] active:translate-y-[4px] transition-all duration-100 transform hover:scale-105"
+          >
+            🏆 Scores
+          </button>
+          <button
+            onClick={onCollection}
+            className="px-6 py-3 text-lg font-bold bg-dino-purple text-white rounded-2xl shadow-[0_4px_0_#5B3A8B] hover:translate-y-[2px] active:translate-y-[4px] transition-all duration-100 transform hover:scale-105"
+          >
+            📚 My Dinos
+          </button>
+        </div>
       </div>
 
       {/* Ground dinos walking */}
